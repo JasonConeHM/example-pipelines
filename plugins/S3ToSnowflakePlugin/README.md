@@ -10,7 +10,7 @@ This wrapper for [snowflake-connector-python](https://github.com/snowflakedb/sno
 
 ## Operators
 ### S3ToSnowflakeOperator
-This operator initializes the connections and executes a COPY command to move the data from S3 to Snowflake.  It takes in a number of parameters:
+This operator initializes the connections and executes a COPY command to move the data from S3 to Snowflake.  It takes in a number of parameters:  
 `s3_bucket`: Name of the S3 Bucket where your file is located  
 `s3_key`: Name of the file inside of the bucket  
 `database`: Name of the Snowflake database  
