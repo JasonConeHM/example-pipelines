@@ -58,7 +58,7 @@ class AstroRequestsToS3Operator(BaseOperator):
         self.http_conn_id = http_conn_id
         self.s3_conn_id = s3_conn_id
         # TODO reqs array validation
-        self.reqs = reqs
+        self.req = req
         self.s3_bucket = s3_bucket
         self.s3_key = s3_key
 
