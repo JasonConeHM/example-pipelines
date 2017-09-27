@@ -28,7 +28,7 @@ class AstroRequestsHook(BaseHook):
 
     def __init__(self, http_conn_id='http_default'):
         self.http_conn_id = http_conn_id
-    
+
     # headers is required to make it required
     def get_conn(self, headers):
         """
@@ -52,12 +52,11 @@ class AstroRequestsHook(BaseHook):
 class AstroRequestsToS3Operator(BaseOperator):
     """
     """
-    def __init__(self, http_conn_id, reqs, s3_conn_id, s3_bucket, s3_key, *args, **kwargs):
+    def __init__(self, http_conn_id, req, s3_conn_id, s3_bucket, s3_key, *args, **kwargs):
         super(AstroRequestsToS3Operator, self).__init__(*args, **kwargs)
 
         self.http_conn_id = http_conn_id
         self.s3_conn_id = s3_conn_id
-        # TODO reqs array validation
         self.req = req
         self.s3_bucket = s3_bucket
         self.s3_key = s3_key
@@ -65,12 +64,13 @@ class AstroRequestsToS3Operator(BaseOperator):
         self.headers = kwargs.pop('headers', {})
 
 
+
     def execute(self, context):
         s3 = S3Hook(self.s3_conn_id).get_conn()
         session = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
 
-        action = req['type'].lower()
-        unpack = req['kwargs']
+        action = self.req['type'].lower()
+        unpack = self.req['kwargs']
     
         return getattr(session, action)(**unpack).json()
 
