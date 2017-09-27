@@ -21,6 +21,20 @@ from airflow.models import BaseOperator
 from airflow.plugins_manager import AirflowPlugin
 from airflow.hooks.S3_hook import S3Hook
 from airflow.hooks.http_hook import HttpHook
+from os.path import join
+
+def join_on(str1, str2, on):
+    """
+    Joins two strings __on__ another string
+    Ensuring that there is one and only one __on__ character at join point
+    """
+    join_point = str1[-1] + str2[0]
+    if join_point.count(on) == 2:
+        join_point = join_point[1] # remove duplicate join characters that may occur on join
+    elif join_point.count(on) == 0:
+        # recombine join_point with character inserted
+        join_point = join_point[0] + on + join_point[-1]
+    return str1[:-1] + join_point + str2[1:]
 
 
 class AstroRequestsHook(BaseHook):
@@ -41,7 +55,6 @@ class AstroRequestsHook(BaseHook):
         self.base_url = conn.host
         if not self.base_url.startswith('http'):
             self.base_url = 'http://' + self.base_url
-
         if conn.port:
             self.base_url = self.base_url + ":" + str(conn.port) + "/"
         if conn.login:
@@ -54,7 +67,7 @@ class AstroRequestsHook(BaseHook):
 class AstroRequestsToS3Operator(BaseOperator):
     """
     """
-    def __init__(self, http_conn_id, request, s3_conn_id, s3_bucket, s3_key, *args, **kwargs):
+    def __init__(self, http_conn_id, request, s3_conn_id, s3_bucket, s3_key,headers=None, transform=None, *args, **kwargs):
         super(AstroRequestsToS3Operator, self).__init__(*args, **kwargs)
 
         self.http_conn_id = http_conn_id
@@ -62,17 +75,24 @@ class AstroRequestsToS3Operator(BaseOperator):
         self.request = request
         self.s3_bucket = s3_bucket
         self.s3_key = s3_key
-        self.headers = kwargs.pop('headers', {})
-        self.transform = kwargs.pop('transform', lambda x: x)
+        
+        self.headers = {} if headers is None else headers
+        self.transform = lambda x: x if transform is None else transform
+
 
 
     def execute(self, context):
-        s3 = S3Hook(self.s3_conn_id).get_conn()
-        session = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
+        # s3 = S3Hook(self.s3_conn_id).get_conn()
+        astro = AstroRequestsHook(self.http_conn_id)
+        session = astro.get_conn(self.headers)
 
         action = self.request['type'].lower()
         unpack = self.request['kwargs']
-    
+
+        url = unpack['url']
+        # Build URL using connection base_url if a fully qualified url was not provided in request
+        unpack['url'] = url if url.startswith('http') else join_on(astro.base_url, url, '/')
+        # return {'base_url': astro.base_url, 'url': url, 'combined': unpack['url']}
         return self.transform(getattr(session, action)(**unpack).json())
 
 
