@@ -1,5 +1,7 @@
 # Plugin - OneClick To Spreadsheet
-This plugin
+This plugin queries the [OneClick](http://oneclickretail.com) API and
+transforms the resulting JSON output to an Excel, using S3 as an intermediary.
+
 ## Hooks
 ### S3Hook
 [Core Airflow S3Hook](https://pythonhosted.org/airflow/_modules/S3_hook.html)
