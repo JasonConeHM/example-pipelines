@@ -3,18 +3,17 @@ An extensible requests plugin for Airflow
 """
 __author__ = 'astronomerio'
 
-#TODO Ratelimiting
-#TODO XCOM
-#TODO XCOM Request chaining
-#TODO Streaming
-#TODO Basic Login to Retrieve Token
-#TODO timeouts http://docs.python-requests.org/en/master/user/quickstart/#timeouts
-#TODO Connection Pooling
-#TODO Session
-  # TODO Will this create a new session for each dag run?
-  # TODO Is this another place we can leverage the DB to store session auth information?
+# TODO Ratelimiting
+# TODO XCOM
+# TODO XCOM Request chaining
+# TODO Streaming
+# TODO Basic Login to Retrieve Token
+# TODO timeouts http://docs.python-requests.org/en/master/user/quickstart/#timeouts
+# TODO Connection Pooling
+# TODO Session
+#   TODO Will this create a new session for each dag run?
+#   TODO Is this another place we can leverage the DB to store session auth information?
 import requests
-
 from airflow.hooks import BaseHook
 from airflow.models import BaseOperator
 from airflow.plugins_manager import AirflowPlugin
