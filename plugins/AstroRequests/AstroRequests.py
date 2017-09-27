@@ -3,6 +3,8 @@ An extensible requests plugin for Airflow
 """
 __author__ = 'astronomerio'
 
+# TODO pass on parameters from the connection extras field
+# TODO User can pass through endpoint or fully qualified URL to connection and have them combined
 # TODO Ratelimiting
 # TODO XCOM
 # TODO XCOM Request chaining
@@ -52,29 +54,26 @@ class AstroRequestsHook(BaseHook):
 class AstroRequestsToS3Operator(BaseOperator):
     """
     """
-    def __init__(self, http_conn_id, req, s3_conn_id, s3_bucket, s3_key, *args, **kwargs):
+    def __init__(self, http_conn_id, request, s3_conn_id, s3_bucket, s3_key, *args, **kwargs):
         super(AstroRequestsToS3Operator, self).__init__(*args, **kwargs)
 
         self.http_conn_id = http_conn_id
         self.s3_conn_id = s3_conn_id
-        self.req = req
+        self.request = request
         self.s3_bucket = s3_bucket
         self.s3_key = s3_key
-
         self.headers = kwargs.pop('headers', {})
-
+        self.transform = kwargs.pop('transform', lambda x: x)
 
 
     def execute(self, context):
         s3 = S3Hook(self.s3_conn_id).get_conn()
         session = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
 
-        action = self.req['type'].lower()
-        unpack = self.req['kwargs']
+        action = self.request['type'].lower()
+        unpack = self.request['kwargs']
     
-        return getattr(session, action)(**unpack).json()
-
-
+        return self.transform(getattr(session, action)(**unpack).json())
 
 
 class AstroRequests(AirflowPlugin):
