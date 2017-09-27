@@ -69,15 +69,11 @@ class AstroRequestsToS3Operator(BaseOperator):
         s3 = S3Hook(self.s3_conn_id).get_conn()
         session = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
 
-        action = {
-            'get': session.get,
-            'post': session.post,
-            'put': session.put,
-            'delete': session.delete
-        }
+        action = req['type'].lower()
+        unpack = req['kwargs']
+    
+        return getattr(session, action)(**unpack).json()
 
-        for req in self.reqs:
-            return action[req['type'].lower()](**req['kwargs']).json()
 
 
 
