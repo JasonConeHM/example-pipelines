@@ -3,8 +3,6 @@ An extensible requests plugin for Airflow
 """
 __author__ = 'astronomerio'
 
-# TODO pass on parameters from the connection extras field
-# TODO User can pass through endpoint or fully qualified URL to connection and have them combined
 # TODO Ratelimiting
 # TODO XCOM
 # TODO XCOM Request chaining
@@ -59,8 +57,12 @@ class AstroRequestsHook(BaseHook):
             self.base_url = self.base_url + ":" + str(conn.port) + "/"
         if conn.login:
             session.auth = (conn.login, conn.password)
-        if headers:
-            session.headers.update(headers)
+        
+        # Use connection extra field as default headers
+        # Override with any headers submitted directly to get_conn()
+        self.headers = conn.extra_dejson()
+        self.headers.update(headers)
+        session.headers.update(headers)
 
         return session
 
