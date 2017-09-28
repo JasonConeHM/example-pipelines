@@ -8,8 +8,6 @@ __author__ = 'astronomerio'
 # TODO XCOM Request chaining
 # TODO Streaming
 # TODO Basic Login to Retrieve Token
-# TODO timeouts http://docs.python-requests.org/en/master/user/quickstart/#timeouts
-# TODO Connection Pooling
 # TODO Session
 #   TODO Will this create a new session for each dag run?
 #   TODO Is this another place we can leverage the DB to store session auth information?
@@ -42,6 +40,7 @@ class AstroRequestsHook(BaseHook):
 
     def __init__(self, http_conn_id='http_default'):
         self.http_conn_id = http_conn_id
+        self.headers = {}
 
     # headers is required to make it required
     def get_conn(self, headers):
@@ -66,47 +65,44 @@ class AstroRequestsHook(BaseHook):
 
         return session
 
-class AstroRequestsToS3Operator(BaseOperator):
+class AstroRequestsBaseOperator(BaseOperator):
     """
     """
-    def __init__(self, http_conn_id, request, s3_conn_id, s3_bucket, s3_key,headers=None, transform=None, *args, **kwargs):
-        super(AstroRequestsToS3Operator, self).__init__(*args, **kwargs)
+    def __init__(self, http_conn_id, request, headers=None, transform=None, *args, **kwargs):
+        super(AstroRequestsBaseOperator, self).__init__(*args, **kwargs)
 
+        # Connetion information
         self.http_conn_id = http_conn_id
-        self.s3_conn_id = s3_conn_id
-        self.request = request
-        self.s3_bucket = s3_bucket
-        self.s3_key = s3_key
-        
-        self.headers = {} if headers is None else headers
+        self.base_url = AstroRequestsHook(self.http_conn_id).base_url
+        # Custom Tranform
         self.transform = lambda x: x if transform is None else transform
-
-
-
-    def execute(self, context):
-        # s3 = S3Hook(self.s3_conn_id).get_conn()
-        astro = AstroRequestsHook(self.http_conn_id)
-        session = astro.get_conn(self.headers)
-
-        # Defaults
-        passthrough = {
+        # Headers to passthrough
+        self.headers = {} if headers is None else headers
+        # Default request parameters
+        self.params = {
             'timeout': 30.000
         }
+        self.params.update(request['kwargs']) # Override defaults
 
-        passthrough.update(self.request['kwargs'])
-        action = self.request['type'].lower()
-       
-        # Build URL using connection base_url if a fully qualified url was not provided in request
-        if not passthrough['url'].startswith('http'):
-            passthrough['url'] = join_on(astro.base_url, passthrough['url'], '/')
+        self.url = (self.params['url'] if self.params['url'].startswith('http') 
+                    else join_on(self.base_url, self.params['url'], '/'))
 
-        return self.transform(getattr(session, action)(**unpack).json())
+        self.request_type = request['type'].lower()
 
+class AstroRequestsToXComOperator(AstroRequestsBaseOperator):
+    """
+    """
+    def __init__(self, http_conn_id, request, headers=None, transform=None, *args, **kwargs):
+        super(AstroRequestsToXComOperator, self).__init__(http_conn_id, request, headers, transform, *args, **kwargs)
+
+    def execute(self, context):
+        http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
+        return self.transform(getattr(http_conn, self.request_type)(self.url, **self.params))
 
 class AstroRequests(AirflowPlugin):
     name = "AstroRequests"
     hooks = [AstroRequestsHook]
-    operators = [AstroRequestsToS3Operator]
+    operators = [AstroRequestsToXComOperator]
     executors = []
     macros = []
     admin_views = []
