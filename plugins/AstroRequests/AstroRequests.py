@@ -88,13 +88,18 @@ class AstroRequestsToS3Operator(BaseOperator):
         astro = AstroRequestsHook(self.http_conn_id)
         session = astro.get_conn(self.headers)
 
-        action = self.request['type'].lower()
-        unpack = self.request['kwargs']
+        # Defaults
+        passthrough = {
+            'timeout': 30.000
+        }
 
-        url = unpack['url']
+        passthrough.update(self.request['kwargs'])
+        action = self.request['type'].lower()
+       
         # Build URL using connection base_url if a fully qualified url was not provided in request
-        unpack['url'] = url if url.startswith('http') else join_on(astro.base_url, url, '/')
-        # return {'base_url': astro.base_url, 'url': url, 'combined': unpack['url']}
+        if not passthrough['url'].startswith('http'):
+            passthrough['url'] = join_on(astro.base_url, passthrough['url'], '/')
+
         return self.transform(getattr(session, action)(**unpack).json())
 
 
