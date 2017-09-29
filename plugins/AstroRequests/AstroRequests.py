@@ -12,24 +12,27 @@ __author__ = 'astronomerio'
 #   TODO Will this create a new session for each dag run?
 #   TODO Is this another place we can leverage the DB to store session auth information?
 import requests
-from airflow.hooks import BaseHook
+from json import dumps
+from airflow.hooks.base_hook import BaseHook
 from airflow.models import BaseOperator
 from airflow.plugins_manager import AirflowPlugin
 from airflow.hooks.S3_hook import S3Hook
 from airflow.hooks.http_hook import HttpHook
-from os.path import join
 
-def join_on(str1, str2, on):
+def join_on(str1, str2, char):
     """
-    Joins two strings __on__ another string
-    Ensuring that there is one and only one __on__ character at join point
+    Joins str1 and str2 on a char
+    Ensure that there is one and only one char at join point
     """
-    join_point = str1[-1] + str2[0]
-    if join_point.count(on) == 2:
+    try:
+        join_point = str1[-1] + str2[0]
+    except IndexError:
+        return str1 + char + str2
+    if join_point.count(char) == 2:
         join_point = join_point[1] # remove duplicate join characters that may occur on join
-    elif join_point.count(on) == 0:
+    elif join_point.count(char) == 0:
         # recombine join_point with character inserted
-        join_point = join_point[0] + on + join_point[-1]
+        join_point = join_point[0] + char + join_point[-1]
     return str1[:-1] + join_point + str2[1:]
 
 
@@ -60,7 +63,7 @@ class AstroRequestsHook(BaseHook):
         
         # Use connection extra field as default headers
         # Override with any headers submitted directly to get_conn()
-        self.headers = conn.extra_dejson()
+        self.headers = conn.extra_dejson
         self.headers.update(headers)
         session.headers.update(headers)
 
@@ -70,14 +73,15 @@ class AstroRequestsBaseOperator(BaseOperator):
     """
     Base class that handles configuration and some defaults
     """
-    def __init__(self, http_conn_id, request, headers=None, transform=None, *args, **kwargs):
+    def __init__(self, http_conn_id, request, headers=None, transform=lambda x: x, *args, **kwargs):
         super(AstroRequestsBaseOperator, self).__init__(*args, **kwargs)
 
         # Connetion information
         self.http_conn_id = http_conn_id
-        self.base_url = AstroRequestsHook(self.http_conn_id).base_url
+        self.base_url = AstroRequestsHook().get_connection(self.http_conn_id).host
+
         # Custom Tranform
-        self.transform = lambda x: x if transform is None else transform
+        self.transform = transform
         # Headers to passthrough
         self.headers = {} if headers is None else headers
         # Default request parameters
@@ -86,8 +90,9 @@ class AstroRequestsBaseOperator(BaseOperator):
         }
         self.params.update(request['kwargs']) # Override defaults
 
-        self.url = (self.params['url'] if self.params['url'].startswith('http') 
-                    else join_on(self.base_url, self.params['url'], '/'))
+        params_url = self.params.pop('url')
+        self.url = (params_url if params_url.startswith('http')
+                    else join_on(self.base_url, params_url, '/'))
 
         self.request_type = request['type'].lower()
 
@@ -100,13 +105,14 @@ class AstroRequestsToXComOperator(AstroRequestsBaseOperator):
 
         action = getattr(http_conn, self.request_type)
         json_response = action(self.url, **self.params).json()
-
+        
         return self.transform(json_response)
 
 class AstroRequestsToS3Operator(AstroRequestsBaseOperator):
     """
     Write a response to an S3 bucket
     """
+    template_fields = ['s3_key']
 
     def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, request, 
                  headers=None, transform=None,
@@ -128,8 +134,8 @@ class AstroRequestsToS3Operator(AstroRequestsBaseOperator):
 
         action = getattr(http_conn, self.request_type)
         json_response = action(self.url, **self.params).json()
-
-        s3_conn.load_string(self.transform(json_response),
+        transformed_str_resp = dumps(self.transform(json_response))
+        s3_conn.load_string(transformed_str_resp,
                             self.s3_key,
                             bucket_name=self.s3_bucket
                            )
@@ -137,7 +143,7 @@ class AstroRequestsToS3Operator(AstroRequestsBaseOperator):
 class AstroRequests(AirflowPlugin):
     name = "AstroRequests"
     hooks = [AstroRequestsHook]
-    operators = [AstroRequestsToXComOperator]
+    operators = [AstroRequestsToXComOperator, AstroRequestsToS3Operator]
     executors = []
     macros = []
     admin_views = []
