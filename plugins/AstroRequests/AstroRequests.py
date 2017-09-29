@@ -41,6 +41,7 @@ class AstroRequestsHook(BaseHook):
     def __init__(self, http_conn_id='http_default'):
         self.http_conn_id = http_conn_id
         self.headers = {}
+        self.base_url = ''
 
     # headers is required to make it required
     def get_conn(self, headers):
@@ -67,6 +68,7 @@ class AstroRequestsHook(BaseHook):
 
 class AstroRequestsBaseOperator(BaseOperator):
     """
+    Base class that handles configuration and some defaults
     """
     def __init__(self, http_conn_id, request, headers=None, transform=None, *args, **kwargs):
         super(AstroRequestsBaseOperator, self).__init__(*args, **kwargs)
@@ -91,13 +93,46 @@ class AstroRequestsBaseOperator(BaseOperator):
 
 class AstroRequestsToXComOperator(AstroRequestsBaseOperator):
     """
+    Write a response to XCom
     """
-    def __init__(self, http_conn_id, request, headers=None, transform=None, *args, **kwargs):
-        super(AstroRequestsToXComOperator, self).__init__(http_conn_id, request, headers, transform, *args, **kwargs)
+    def execute(self, context):
+        http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
+
+        action = getattr(http_conn, self.request_type)
+        json_response = action(self.url, **self.params).json()
+
+        return self.transform(json_response)
+
+class AstroRequestsToS3Operator(AstroRequestsBaseOperator):
+    """
+    Write a response to an S3 bucket
+    """
+
+    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, request, 
+                 headers=None, transform=None,
+                 *args, **kwargs):
+        super(AstroRequestsToS3Operator, self).__init__(
+            http_conn_id,
+            request,
+            headers,
+            transform,
+            *args, **kwargs)
+
+        self.s3_conn_id = s3_conn_id
+        self.s3_bucket = s3_bucket
+        self.s3_key = s3_key
 
     def execute(self, context):
         http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
-        return self.transform(getattr(http_conn, self.request_type)(self.url, **self.params))
+        s3_conn = S3Hook(self.s3_conn_id)
+
+        action = getattr(http_conn, self.request_type)
+        json_response = action(self.url, **self.params).json()
+
+        s3_conn.load_string(self.transform(json_response),
+                            self.s3_key,
+                            bucket_name=self.s3_bucket
+                           )
 
 class AstroRequests(AirflowPlugin):
     name = "AstroRequests"
