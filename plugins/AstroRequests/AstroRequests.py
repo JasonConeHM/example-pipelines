@@ -4,13 +4,7 @@ An extensible requests plugin for Airflow
 __author__ = 'astronomerio'
 
 # TODO Ratelimiting
-# TODO XCOM
-# TODO XCOM Request chaining
-# TODO Streaming
-# TODO Basic Login to Retrieve Token
-# TODO Session
-#   TODO Will this create a new session for each dag run?
-#   TODO Is this another place we can leverage the DB to store session auth information?
+
 import requests
 from json import dumps
 from airflow.hooks.base_hook import BaseHook
@@ -38,7 +32,10 @@ def join_on(str1, str2, char):
 
 class AstroRequestsHook(BaseHook):
     """
+    Provides a requests Session()
     """
+    # TODO Support All types of Autopilot API Login
+
     conn_type = 'HTTP'
 
     def __init__(self, http_conn_id='http_default'):
@@ -73,7 +70,7 @@ class AstroRequestsBaseOperator(BaseOperator):
     """
     Base class that handles configuration and some defaults
     """
-    def __init__(self, http_conn_id, request, headers=None, transform=lambda x: x, *args, **kwargs):
+    def __init__(self, http_conn_id, request, headers=None, func=lambda x: x, *args, **kwargs):
         super(AstroRequestsBaseOperator, self).__init__(*args, **kwargs)
 
         # Connetion information
@@ -81,7 +78,7 @@ class AstroRequestsBaseOperator(BaseOperator):
         self.base_url = AstroRequestsHook().get_connection(self.http_conn_id).host
 
         # Custom Tranform
-        self.transform = transform
+        self.func = func
         # Headers to passthrough
         self.headers = {} if headers is None else headers
         # Default request parameters
@@ -96,7 +93,7 @@ class AstroRequestsBaseOperator(BaseOperator):
 
         self.request_type = request['type'].lower()
 
-class AstroRequestsToXComOperator(AstroRequestsBaseOperator):
+class ToXComOperator(AstroRequestsBaseOperator):
     """
     Write a response to XCom
     """
@@ -106,22 +103,24 @@ class AstroRequestsToXComOperator(AstroRequestsBaseOperator):
         action = getattr(http_conn, self.request_type)
         json_response = action(self.url, **self.params).json()
         
-        return self.transform(json_response)
+        return self.func(json_response)
 
-class AstroRequestsToS3Operator(AstroRequestsBaseOperator):
+class ToS3Operator(AstroRequestsBaseOperator):
     """
     Write a response to an S3 bucket
     """
     template_fields = ['s3_key']
 
-    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, request, 
-                 headers=None, transform=None,
+    # TODO Take templated parameters from an AstroRequestToS3Operator
+
+    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, request, xcom_info=None,
+                 headers=None, func=None,
                  *args, **kwargs):
-        super(AstroRequestsToS3Operator, self).__init__(
+        super(ToS3Operator, self).__init__(
             http_conn_id,
             request,
             headers,
-            transform,
+            func,
             *args, **kwargs)
 
         self.s3_conn_id = s3_conn_id
@@ -134,11 +133,42 @@ class AstroRequestsToS3Operator(AstroRequestsBaseOperator):
 
         action = getattr(http_conn, self.request_type)
         json_response = action(self.url, **self.params).json()
-        transformed_str_resp = dumps(self.transform(json_response))
-        s3_conn.load_string(transformed_str_resp,
+        funced_str_resp = dumps(self.func(json_response))
+        s3_conn.load_string(funced_str_resp,
                             self.s3_key,
                             bucket_name=self.s3_bucket
                            )
+
+
+class FromXComOperatorToS3(AstroRequestsBaseOperator):
+    # TODO Refactor for multiple inhertiance
+    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, chained_task, param_func, request):
+        super(FromXComOperatorToS3, self).__init__(http_conn_id, request, func=param_func,
+                                                   *args, **kwargs)
+        self.chained_task = chained_task
+        self.s3_conn_id = s3_conn_id
+        self.s3_bucket = s3_bucket
+        self.s3_key = s3_key
+
+    def execute(self, context):
+        x = context['ti'].xcom_pull(chain_task_id)
+
+        http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
+        action = getattr(http_conn, self.request_type)
+        json_response = action(self.url, **self.params).json()
+
+        if x is None:
+            
+        if x isinstance(x, dict):
+            fetched_params = func(x)
+            self.params.update(fetched_params)
+            return action(self.url, **self.params).json()
+
+
+        if x isinstance(x, list):
+            
+
+    
 
 class AstroRequests(AirflowPlugin):
     name = "AstroRequests"
