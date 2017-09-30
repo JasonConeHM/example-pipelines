@@ -72,15 +72,16 @@ class S3ToSpreadsheetOperator(BaseOperator):
         input_s3 = S3Hook(s3_conn_id=self.input_s3_conn_id)
         output_s3 = S3Hook(s3_conn_id=self.output_s3_conn_id)
 
-        ik = (input_s3.get_key(self.input_s3_key,
-                               bucket_name=self.input_s3_bucket))
+        input_key = (input_s3.get_key(self.input_s3_key,
+                                      bucket_name=self.input_s3_bucket))
         input_s3.connection.close()
 
         if self.input_file_type.lower() == 'json':
-            df = pd.read_json(ik.get_contents_as_string(encoding='utf-8'),
+            df = pd.read_json(input_key
+                              .get_contents_as_string(encoding='utf-8'),
                               orient='records')
         elif self.input_file_type.lower() == 'csv':
-            df = pd.read_csv(ik, low_memory=False)
+            df = pd.read_csv(input_key, low_memory=False)
         else:
             raise Exception('Unsupported File Type')
         # Apply a mapping function to escape invalid characters
