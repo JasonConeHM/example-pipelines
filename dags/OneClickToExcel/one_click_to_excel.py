@@ -19,7 +19,7 @@ with dag:
 
     one_click_to_s3 = OneClickToS3Operator(
         task_id='one_click',
-        one_click_conn='one_click-connection-id',
+        one_click_conn='one_click_connection_id',
         start='{{ macros.ds_add(ds, -1) }}',
         end='{{ macros.ds_add(ds, -2) }}',
         s3_conn_id='s3-connection-id',

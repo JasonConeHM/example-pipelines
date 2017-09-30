@@ -20,19 +20,19 @@ with dag:
     kick_off_dag = DummyOperator(task_id='kick_off_dag')
     for endpoint in endpoints:
         clavis_to_s3 = ClavisToS3Operator(
-            task_id=('clavis_output_{0}'.format(endpoint)),
+            task_id='clavis_output_{0}'.format(endpoint),
             http_conn_id='clavis-connection-id',
             clavis_endpoint=endpoint,
             payload={'report_date': '{{ yesterday_ds }}'},
             s3_conn_id='s3-connection-id',
             s3_bucket='bucket-name',
-            s3_key=('/path/to/file/{0}.json'.format(endpoint)))
+            s3_key='/path/to/file/{0}.json'.format(endpoint))
 
         i = '{0}.json'.format(endpoint)
         o = "{0}.xlsx".format(endpoint)
 
         s3_to_excel = S3ToSpreadsheetOperator(
-            task_id=('read_{0}_into_excel'.format(endpoint)),
+            task_id='read_{0}_into_excel'.format(endpoint),
             input_s3_conn_id='input-s3-connection-id',
             input_s3_bucket='input-bucket-name',
             input_s3_key="/path/to/file/{0}".format(i),

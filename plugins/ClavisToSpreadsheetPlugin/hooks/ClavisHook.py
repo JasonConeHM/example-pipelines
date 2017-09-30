@@ -6,10 +6,10 @@ class ClavisHook(HttpHook):
         super().__init__(method, http_conn_id)
 
     def get_conn(self, headers=None):
+        session = super().get_conn(headers)
         if self.endpoint == 'token':
-            return super().get_conn(headers)
+            return session
         else:
-            session = super().get_conn(headers)
             session.auth = None
             return session
 
