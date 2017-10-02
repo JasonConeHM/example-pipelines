@@ -31,6 +31,9 @@ def join_on(str1, str2, char):
 
 
 def filename_from_dict(dict):
+    """
+    Create a filename consisting of key/values from a dict
+    """
     r = ''
     for key in dict:
         r += '{}_{}'.format(str(key), str(dict[key]))
@@ -103,7 +106,8 @@ class AstroRequestsBaseOperator(BaseOperator):
 
 class ToXComOperator(AstroRequestsBaseOperator):
     """
-    Write a response to XCom
+    Extends AstroRequestsBaseOperator and allows writing to XCOM for 
+    logging purposes or chaining of another request
     """
     def execute(self, context):
         http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
@@ -115,7 +119,8 @@ class ToXComOperator(AstroRequestsBaseOperator):
 
 class ToS3Operator(AstroRequestsBaseOperator):
     """
-    Write a response to an S3 bucket
+    Extends AstroRequestsBaseOperator and allows for writing to S3 for
+    logging purposes or chaining of another request with FromS3ToS3Operator
     """
     template_fields = ['s3_key']
 
@@ -200,6 +205,7 @@ class FromXcomToS3Operator(AstroRequestsBaseOperator):
                     '{}-{}'.format(self.s3_key, filename_from_dict(self.params['params'])),
                     self.s3_bucket
                 )
+
 
 class AstroRequests(AirflowPlugin):
     name = "AstroRequests"
