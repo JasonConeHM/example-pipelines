@@ -30,6 +30,14 @@ def join_on(str1, str2, char):
     return str1[:-1] + join_point + str2[1:]
 
 
+def filename_from_dict(dict):
+    r = ''
+    for key in dict:
+        r += '{}_{}'.format(str(key), str(dict[key]))
+    
+    return r
+
+
 class AstroRequestsHook(BaseHook):
     """
     Provides a requests Session()
@@ -70,7 +78,7 @@ class AstroRequestsBaseOperator(BaseOperator):
     """
     Base class that handles configuration and some defaults
     """
-    def __init__(self, http_conn_id, request, headers=None, func=lambda x: x, *args, **kwargs):
+    def __init__(self, http_conn_id, request, headers=None, dest_func=lambda x: x, *args, **kwargs):
         super(AstroRequestsBaseOperator, self).__init__(*args, **kwargs)
 
         # Connetion information
@@ -78,7 +86,7 @@ class AstroRequestsBaseOperator(BaseOperator):
         self.base_url = AstroRequestsHook().get_connection(self.http_conn_id).host
 
         # Custom Tranform
-        self.func = func
+        self.dest_func = dest_func
         # Headers to passthrough
         self.headers = {} if headers is None else headers
         # Default request parameters
@@ -103,7 +111,7 @@ class ToXComOperator(AstroRequestsBaseOperator):
         action = getattr(http_conn, self.request_type)
         json_response = action(self.url, **self.params).json()
         
-        return self.func(json_response)
+        return self.dest_func(json_response)
 
 class ToS3Operator(AstroRequestsBaseOperator):
     """
@@ -139,41 +147,64 @@ class ToS3Operator(AstroRequestsBaseOperator):
                             bucket_name=self.s3_bucket
                            )
 
+class FromXcomToS3Operator(AstroRequestsBaseOperator):
+    """
+    TODO Make doc_str
+    TODO Refactor for multiple inheritance
+    """
 
-class FromXComOperatorToS3(AstroRequestsBaseOperator):
-    # TODO Refactor for multiple inhertiance
-    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, chained_task, param_func, request):
-        super(FromXComOperatorToS3, self).__init__(http_conn_id, request, func=param_func,
-                                                   *args, **kwargs)
-        self.chained_task = chained_task
+    template_fields = ['s3_key']
+
+    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, xcom_task_id, source_func, dest_func, request,
+        *args, **kwargs):
+        super(FromXcomToS3Operator, self).__init__(http_conn_id, request, *args, **kwargs)
+        self.source_func = source_func
+        self.dest_func = dest_func
+        self.xcom_task_id = xcom_task_id
         self.s3_conn_id = s3_conn_id
         self.s3_bucket = s3_bucket
         self.s3_key = s3_key
 
     def execute(self, context):
-        x = context['ti'].xcom_pull(chain_task_id)
+        prev_requests = context['ti'].xcom_pull(self.xcom_task_id)
 
         http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
+        s3_conn = S3Hook(self.s3_conn_id)
         action = getattr(http_conn, self.request_type)
-        json_response = action(self.url, **self.params).json()
+        if isinstance(prev_requests, dict):
+            req_params = self.source_func(prev_requests)
+            self.params.update({'params': req_params})
 
-        if x is None:
-            
-        if x isinstance(x, dict):
-            fetched_params = func(x)
-            self.params.update(fetched_params)
-            return action(self.url, **self.params).json()
+            s3_conn.load_string(
+                dumps(
+                    self.dest_func(
+                        action(self.url, **self.params).json()
+                    )
+                ),
+                self.s3_key,
+                self.s3_bucket
+            )
 
+        if isinstance(prev_requests, list):
+            # Use Source to Implement New Params
+            for result in prev_requests:
+                req_params = self.source_func(result)
+                self.params.update({'params': req_params})
 
-        if x isinstance(x, list):
-            
-
-    
+                s3_conn.load_string(
+                    dumps(
+                        self.dest_func(
+                            action(self.url, **self.params).json()
+                        )
+                    ),
+                    '{}-{}'.format(self.s3_key, filename_from_dict(self.params['params'])),
+                    self.s3_bucket
+                )
 
 class AstroRequests(AirflowPlugin):
     name = "AstroRequests"
     hooks = [AstroRequestsHook]
-    operators = [AstroRequestsToXComOperator, AstroRequestsToS3Operator]
+    operators = [ToXComOperator, ToS3Operator, FromXcomToS3Operator]
     executors = []
     macros = []
     admin_views = []
