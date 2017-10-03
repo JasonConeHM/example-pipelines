@@ -22,15 +22,14 @@ class DummySensorOperator(BaseSensorOperator):
 
     @apply_defaults
     def __init__(self, flag, *args, **kwargs):
-        self.flag = flag
         super(DummySensorOperator, self).__init__(*args, **kwargs)
+        self.flag = flag
 
     def poke(self, context):
-        return self.flag
+        return True if self.flag in [1, True, 'true', 'True'] else False
         
-
 class DummySensorPlugin(AirflowPlugin):
-    name = "DummySensor"
+    name = "DummySensorPlugin"
     hooks = []
     operators = [DummySensorOperator]
     executors = []
