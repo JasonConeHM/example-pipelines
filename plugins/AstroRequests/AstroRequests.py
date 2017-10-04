@@ -4,14 +4,16 @@ An extensible requests plugin for Airflow
 __author__ = 'astronomerio'
 
 # TODO Ratelimiting
+# TODO Pagination
+# TODO Support various types of auth
 
-import requests
 from json import dumps
+import requests
+
 from airflow.hooks.base_hook import BaseHook
 from airflow.models import BaseOperator
 from airflow.plugins_manager import AirflowPlugin
 from airflow.hooks.S3_hook import S3Hook
-from airflow.hooks.http_hook import HttpHook
 
 def join_on(str1, str2, char):
     """
@@ -30,26 +32,26 @@ def join_on(str1, str2, char):
     return str1[:-1] + join_point + str2[1:]
 
 
-def filename_from_dict(dict):
+def filename_from_dict(dictionary):
     """
     Create a filename consisting of key/values from a dict
     """
-    r = ''
-    for key in dict:
-        r += '{}_{}'.format(str(key), str(dict[key]))
-    
-    return r
+    file_name = ''
+    for key in dictionary:
+        file_name += '{}_{}'.format(str(key), str(dictionary[key]))
+
+    return file_name
 
 
 class AstroRequestsHook(BaseHook):
     """
     Provides a requests Session()
     """
-    # TODO Support All types of Autopilot API Login
 
     conn_type = 'HTTP'
 
     def __init__(self, http_conn_id='http_default'):
+        super(AstroRequestsHook, self).__init__(http_conn_id)
         self.http_conn_id = http_conn_id
         self.headers = {}
         self.base_url = ''
@@ -81,28 +83,34 @@ class AstroRequestsBaseOperator(BaseOperator):
     """
     Base class that handles configuration and some defaults
     """
-    def __init__(self, http_conn_id, request, headers=None, dest_func=lambda x: x, *args, **kwargs):
+    def __init__(self, http_conn_id, request_definition,
+        headers=None,
+        src_transform=lambda x: x,
+        dst_transform=lambda x: x, *args, **kwargs):
         super(AstroRequestsBaseOperator, self).__init__(*args, **kwargs)
 
         # Connetion information
         self.http_conn_id = http_conn_id
         self.base_url = AstroRequestsHook().get_connection(self.http_conn_id).host
 
-        # Custom Tranform
-        self.dest_func = dest_func
+        # Pre and Post Request
+        self.src_transform = src_transform
+        self.dst_transform = dst_transform
+
         # Headers to passthrough
         self.headers = {} if headers is None else headers
+
         # Default request parameters
         self.params = {
             'timeout': 30.000
         }
-        self.params.update(request['kwargs']) # Override defaults
+        self.params.update(request_definition['kwargs']) # Override defaults
 
         params_url = self.params.pop('url')
         self.url = (params_url if params_url.startswith('http')
                     else join_on(self.base_url, params_url, '/'))
 
-        self.request_type = request['type'].lower()
+        self.request_type = request_definition['type'].lower()
 
 class ToXComOperator(AstroRequestsBaseOperator):
     """
@@ -115,7 +123,7 @@ class ToXComOperator(AstroRequestsBaseOperator):
         action = getattr(http_conn, self.request_type)
         json_response = action(self.url, **self.params).json()
         
-        return self.dest_func(json_response)
+        return self.dst_transform(json_response)
 
 class ToS3Operator(AstroRequestsBaseOperator):
     """
@@ -124,16 +132,17 @@ class ToS3Operator(AstroRequestsBaseOperator):
     """
     template_fields = ['s3_key']
 
-    # TODO Take templated parameters from an AstroRequestToS3Operator
-
     def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, request, xcom_info=None,
-                 headers=None, func=None,
+                 headers=None,
+                 dst_transform=lambda x: x,
+                 src_transform=lambda x: x,
                  *args, **kwargs):
         super(ToS3Operator, self).__init__(
             http_conn_id,
             request,
             headers,
-            func,
+            src_transform=src_transform,
+            dst_tranform=dst_transform,
             *args, **kwargs)
 
         self.s3_conn_id = s3_conn_id
@@ -146,8 +155,8 @@ class ToS3Operator(AstroRequestsBaseOperator):
 
         action = getattr(http_conn, self.request_type)
         json_response = action(self.url, **self.params).json()
-        funced_str_resp = dumps(self.func(json_response))
-        s3_conn.load_string(funced_str_resp,
+        tranformed_str = dumps(self.dst_transform(json_response))
+        s3_conn.load_string(tranformed_str,
                             self.s3_key,
                             bucket_name=self.s3_bucket
                            )
@@ -160,11 +169,15 @@ class FromXcomToS3Operator(AstroRequestsBaseOperator):
 
     template_fields = ['s3_key']
 
-    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, xcom_task_id, source_func, dest_func, request,
+    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, xcom_task_id, request,
+        dst_transform,
+        src_transform,
         *args, **kwargs):
-        super(FromXcomToS3Operator, self).__init__(http_conn_id, request, *args, **kwargs)
-        self.source_func = source_func
-        self.dest_func = dest_func
+        super(FromXcomToS3Operator, self).__init__(http_conn_id, request,
+        src_transform=src_transform,
+        dst_transform=dst_transform,
+        *args, **kwargs)
+
         self.xcom_task_id = xcom_task_id
         self.s3_conn_id = s3_conn_id
         self.s3_bucket = s3_bucket
@@ -177,12 +190,12 @@ class FromXcomToS3Operator(AstroRequestsBaseOperator):
         s3_conn = S3Hook(self.s3_conn_id)
         action = getattr(http_conn, self.request_type)
         if isinstance(prev_requests, dict):
-            req_params = self.source_func(prev_requests)
+            req_params = self.src_transform(prev_requests)
             self.params.update({'params': req_params})
 
             s3_conn.load_string(
                 dumps(
-                    self.dest_func(
+                    self.dst_transform(
                         action(self.url, **self.params).json()
                     )
                 ),
@@ -193,12 +206,12 @@ class FromXcomToS3Operator(AstroRequestsBaseOperator):
         if isinstance(prev_requests, list):
             # Use Source to Implement New Params
             for result in prev_requests:
-                req_params = self.source_func(result)
+                req_params = self.src_transform(result)
                 self.params.update({'params': req_params})
 
                 s3_conn.load_string(
                     dumps(
-                        self.dest_func(
+                        self.dst_transform(
                             action(self.url, **self.params).json()
                         )
                     ),
