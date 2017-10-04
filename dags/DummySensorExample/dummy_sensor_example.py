@@ -25,9 +25,14 @@ start = DummyOperator(
     dag=dag
 )
 
+# end = DummyOperator(
+#     task_id='end_pipeline',
+#     dag=dag
+# )
+
 dummies = []
-for i in range(0, 10):
-    dummy = DummySensorOperator(
+for i in range(0, 75):
+    d_sensor = DummySensorOperator(
         task_id='dummy_sensor_{}'.format(i),
         timeout=1,
         poke_interval=2,
@@ -36,12 +41,10 @@ for i in range(0, 10):
         dag=dag
     )
 
-    dummies.append(dummy)
-
-end = DummyOperator(
-    task_id='end_pipeline',
+    d_operator = DummyOperator(
+    task_id='dummy_operator_{}'.format(i),
     dag=dag
-)
+    )
 
-start.set_downstream(dummies)
-end.set_upstream(dummies)
+    start.set_downstream(d_sensor)
+    d_sensor.set_downstream(d_operator)
