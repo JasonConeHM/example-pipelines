@@ -10,3 +10,7 @@ on what argument you pass into the flag argument.
 `flag`: A truthy of falsey value that dictates how the sensor will evaluate.
 
 It will also except any arguments from the BaseSensorOperator.
+
+## Example Usage
+You can find an example usage of this plugin inside of the dags/DummySensorExample/dummy\_sensor\_example.py
+file of this repo.
