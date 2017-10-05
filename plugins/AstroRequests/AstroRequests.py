@@ -163,8 +163,8 @@ class ToS3Operator(AstroRequestsBaseOperator):
 
 class FromXcomToS3Operator(AstroRequestsBaseOperator):
     """
-    TODO Make doc_str
-    TODO Refactor for multiple inheritance
+    Processes a JSON object from XCOM, transforms the object and uses it as the 
+    params on a request
     """
 
     template_fields = ['s3_key']
