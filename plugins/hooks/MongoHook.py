@@ -1,4 +1,5 @@
 """
+TEST
 """
 from ssl import CERT_NONE
 from pymongo import MongoClient
@@ -37,7 +38,7 @@ class MongoHook(BaseHook):
 
         # Mongo Connection Options dict that is unpacked when passed to MongoClient
         options = conn.extra_dejson
-        
+
         # If we are using SSL disable requiring certs from specific hostname
         if options.get('ssl', False):
             options.update({'ssl_cert_reqs':CERT_NONE})
