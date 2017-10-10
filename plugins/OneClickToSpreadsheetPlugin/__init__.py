@@ -1,7 +1,7 @@
 from airflow.plugins_manager import AirflowPlugin
-from OneClickToSpreadsheet.operators.OneClickToS3Operator\
+from OneClickToSpreadsheetPlugin.operators.OneClickToS3Operator\
     import OneClickToS3Operator
-from OneClickToSpreadsheet.operators.S3ToSpreadsheetOperator\
+from OneClickToSpreadsheetPlugin.operators.S3ToSpreadsheetOperator\
     import S3ToSpreadsheetOperator
 
 
