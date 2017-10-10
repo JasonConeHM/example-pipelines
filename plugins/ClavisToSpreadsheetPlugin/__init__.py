@@ -1,8 +1,8 @@
 from airflow.plugins_manager import AirflowPlugin
-from OneClickToSpreadsheet.hooks.ClavisHook import ClavisHook
-from ClavisToSpreadsheet.operators.ClavisToS3Operator\
+from ClavisToSpreadsheetPlugin.hooks.ClavisHook import ClavisHook
+from ClavisToSpreadsheetPlugin.operators.ClavisToS3Operator\
     import ClavisToS3Operator
-from OneClickToSpreadsheet.operators.S3ToSpreadsheetOperator\
+from ClavisToSpreadsheetPlugin.operators.S3ToSpreadsheetOperator\
     import S3ToSpreadsheetOperator
 
 
