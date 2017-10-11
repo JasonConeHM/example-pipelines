@@ -5,6 +5,8 @@ __author__ = 'astronomerio'
 
 # TODO Ratelimiting
 # TODO Pagination
+#   TODO Move pagination into a class with each method being a different type of pagination?
+#   TODO It's more of an execution class with depagination methods?
 # TODO Support various types of auth
 
 from json import dumps
@@ -32,7 +34,7 @@ def join_on(str1, str2, char):
     return str1[:-1] + join_point + str2[1:]
 
 
-def filename_from_dict(dictionary):
+def fn_from_dict(dictionary):
     """
     Create a filename consisting of key/values from a dict
     """
@@ -42,8 +44,33 @@ def filename_from_dict(dictionary):
 
     return file_name
 
+def autopilot_depagify(request_method, endpoint, request_kwargs, recs=None):
+    '''
+    Written as a closure so we can reuse our request Session()
+    connection passed by http_conn
+    '''
+    resp = request_method(endpoint, **request_kwargs).json()
+    recs = [] if recs is None else recs
+    # Append New Records
+    if isinstance(resp['contacts'], list):
+        recs += resp['contacts']
+    else:
+        recs.append(resp['contacts'])
+    # Check if we need to de-paginate
+    if resp.get('bookmark', False):
+        next_endpoint = endpoint + '/' + resp['bookmark']
+        autopilot_depagify(request_method, next_endpoint, request_kwargs, recs)
+    else:
+        return recs
 
-class AstroRequestsHook(BaseHook):
+def default_depagify(request_method, endpoint, request_kwargs):
+    """
+    Default execution method that assumes no pagination
+    """
+    return request_method(endpoint, **request_kwargs).json()
+
+
+class AstroRequestHook(BaseHook):
     """
     Provides a requests Session()
     """
@@ -51,13 +78,12 @@ class AstroRequestsHook(BaseHook):
     conn_type = 'HTTP'
 
     def __init__(self, http_conn_id='http_default'):
-        super(AstroRequestsHook, self).__init__(http_conn_id)
+        super().__init__(http_conn_id)
         self.http_conn_id = http_conn_id
-        self.headers = {}
-        self.base_url = ''
+        self.base_url = None
 
     # headers is required to make it required
-    def get_conn(self, headers):
+    def get_conn(self, headers=None):
         """
         Returns http session for use with requests
         """
@@ -73,44 +99,62 @@ class AstroRequestsHook(BaseHook):
         
         # Use connection extra field as default headers
         # Override with any headers submitted directly to get_conn()
-        self.headers = conn.extra_dejson
-        self.headers.update(headers)
-        session.headers.update(headers)
+        connection_headers = conn.extra_dejson
+        session.headers.update(connection_headers)
 
         return session
 
 class AstroRequestsBaseOperator(BaseOperator):
     """
-    Base class that handles configuration and some defaults
+    Another base class that extends BaseOperator while providing
+    more functionality for AstroRequest classes
     """
-    def __init__(self, http_conn_id, request_definition,
-        headers=None,
-        src_transform=lambda x: x,
-        dst_transform=lambda x: x, *args, **kwargs):
-        super(AstroRequestsBaseOperator, self).__init__(*args, **kwargs)
+    def __init__(self,
+                 http_conn_id,
+                 request_definition,
+                 headers=None,
+                 src_transform=lambda x: x,
+                 dst_transform=lambda x: x,
+                 *args, **kwargs):
 
-        # Connetion information
+        super().__init__(*args, **kwargs)
+
+
         self.http_conn_id = http_conn_id
-        self.base_url = AstroRequestsHook().get_connection(self.http_conn_id).host
-
-        # Pre and Post Request
+        self.base_url = AstroRequestHook().get_connection(self.http_conn_id).host
+        # Gets passed through to the request
+        self.headers = {} if headers is None else headers
+        # Pre and Post Request Transforms
         self.src_transform = src_transform
         self.dst_transform = dst_transform
 
-        # Headers to passthrough
-        self.headers = {} if headers is None else headers
+        # ---------------------------
+        # Parse out request information from request_definition
+        # ---------------------------
 
         # Default request parameters
-        self.params = {
+        self.request_kwargs = {
             'timeout': 30.000
         }
-        self.params.update(request_definition['kwargs']) # Override defaults
+        self.request_kwargs.update(request_definition['kwargs']) # Override defaults
 
-        params_url = self.params.pop('url')
+        # Create endpoint url
+        params_url = self.request_kwargs.pop('url')
         self.url = (params_url if params_url.startswith('http')
                     else join_on(self.base_url, params_url, '/'))
-
+        # Grab request type to dynamically build request
         self.request_type = request_definition['type'].lower()
+
+    def execute_request(self, endpoint, request_kwargs):
+        """
+        Executes a request using the provided Session() method and endpoint.
+        For anything more than that it unpacks the request_kwargs in the method
+        """
+        http_conn = AstroRequestHook(self.http_conn_id).get_conn(self.headers)
+        fetched_method = getattr(http_conn, self.request_type)
+
+        default_depagify(fetched_method, endpoint, request_kwargs)
+
 
 class ToXComOperator(AstroRequestsBaseOperator):
     """
@@ -118,12 +162,9 @@ class ToXComOperator(AstroRequestsBaseOperator):
     logging purposes or chaining of another request
     """
     def execute(self, context):
-        http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
+        resp = self.execute_request(self.url, self.request_kwargs)
 
-        action = getattr(http_conn, self.request_type)
-        json_response = action(self.url, **self.params).json()
-        
-        return self.dst_transform(json_response)
+        return self.dst_transform(resp)
 
 class ToS3Operator(AstroRequestsBaseOperator):
     """
@@ -132,15 +173,16 @@ class ToS3Operator(AstroRequestsBaseOperator):
     """
     template_fields = ['s3_key']
 
-    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, request, xcom_info=None,
+    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, request_definition, 
+                 xcom_info=None,
                  headers=None,
                  dst_transform=lambda x: x,
                  src_transform=lambda x: x,
                  *args, **kwargs):
-        super(ToS3Operator, self).__init__(
+        super().__init__(
             http_conn_id,
-            request,
-            headers,
+            request_definition=request_definition,
+            headers=headers,
             src_transform=src_transform,
             dst_tranform=dst_transform,
             *args, **kwargs)
@@ -150,33 +192,37 @@ class ToS3Operator(AstroRequestsBaseOperator):
         self.s3_key = s3_key
 
     def execute(self, context):
-        http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
         s3_conn = S3Hook(self.s3_conn_id)
-
-        action = getattr(http_conn, self.request_type)
-        json_response = action(self.url, **self.params).json()
-        tranformed_str = dumps(self.dst_transform(json_response))
-        s3_conn.load_string(tranformed_str,
+              
+        resp = self.execute_request(self.url, self.request_kwargs)
+        # Apply transformation then dump back to string
+        transformed_str = dumps(self.dst_transform(resp))
+        
+        s3_conn.load_string(transformed_str,
                             self.s3_key,
                             bucket_name=self.s3_bucket
-                           )
+                            )
 
 class FromXcomToS3Operator(AstroRequestsBaseOperator):
     """
-    Processes a JSON object from XCOM, transforms the object and uses it as the 
+    Processes a JSON object from XCOM, transforms the object and uses it as the
     params on a request
     """
 
     template_fields = ['s3_key']
 
-    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key, xcom_task_id, request,
-        dst_transform,
-        src_transform,
-        *args, **kwargs):
-        super(FromXcomToS3Operator, self).__init__(http_conn_id, request,
-        src_transform=src_transform,
-        dst_transform=dst_transform,
-        *args, **kwargs)
+    def __init__(self, http_conn_id, s3_conn_id, s3_bucket, s3_key,
+                 xcom_task_id,
+                 request_definition,
+                 dst_transform,
+                 src_transform,
+                 *args, **kwargs):
+
+        super().__init__(http_conn_id,
+                         request_definition=request_definition,
+                         src_transform=src_transform,
+                         dst_transform=dst_transform,
+                         *args, **kwargs)
 
         self.xcom_task_id = xcom_task_id
         self.s3_conn_id = s3_conn_id
@@ -185,44 +231,42 @@ class FromXcomToS3Operator(AstroRequestsBaseOperator):
 
     def execute(self, context):
         prev_requests = context['ti'].xcom_pull(self.xcom_task_id)
-
-        http_conn = AstroRequestsHook(self.http_conn_id).get_conn(self.headers)
         s3_conn = S3Hook(self.s3_conn_id)
-        action = getattr(http_conn, self.request_type)
+
         if isinstance(prev_requests, dict):
             req_params = self.src_transform(prev_requests)
-            self.params.update({'params': req_params})
+            self.request_kwargs.update({'params': req_params})
 
-            s3_conn.load_string(
-                dumps(
-                    self.dst_transform(
-                        action(self.url, **self.params).json()
-                    )
-                ),
-                self.s3_key,
-                self.s3_bucket
-            )
+            resp = self.execute_request(self.url, self.request_kwargs)
+            # Apply transformation then dump back to string
+            transformed_str = dumps(self.dst_transform(resp))
+
+            s3_conn.load_string(transformed_str,
+                                self.s3_key,
+                                bucket_name=self.s3_bucket
+                               )
 
         if isinstance(prev_requests, list):
             # Use Source to Implement New Params
             for result in prev_requests:
                 req_params = self.src_transform(result)
-                self.params.update({'params': req_params})
+                self.request_kwargs.update({'params': req_params})
 
-                s3_conn.load_string(
-                    dumps(
-                        self.dst_transform(
-                            action(self.url, **self.params).json()
-                        )
-                    ),
-                    '{}-{}'.format(self.s3_key, filename_from_dict(self.params['params'])),
-                    self.s3_bucket
-                )
+                resp = self.execute_request(self.url, self.request_kwargs)
+                # Apply transformation then dump back to string
+                transformed_str = dumps(self.dst_transform(resp))
 
+                new_s3_key = '{}-{}'.format(self.s3_key,
+                                            fn_from_dict(self.request_kwargs['params']))
+
+                s3_conn.load_string(transformed_str,
+                                    new_s3_key,
+                                    bucket_name=self.s3_bucket
+                                   )
 
 class AstroRequests(AirflowPlugin):
     name = "AstroRequests"
-    hooks = [AstroRequestsHook]
+    hooks = [AstroRequestHook]
     operators = [ToXComOperator, ToS3Operator, FromXcomToS3Operator]
     executors = []
     macros = []
