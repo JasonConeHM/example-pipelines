@@ -79,7 +79,7 @@ class MongoToS3BaseOperator(BaseOperator):
         Processes pyMongo cursor and returns single array with each element being
                 a JSON serializable dictionary
 
-        CaliberMindMongoToS3BaseOperator.transform() assumes no processing is needed
+        MongoToS3BaseOperator.transform() assumes no processing is needed
         ie. docs is a pyMongo cursor of documents and cursor just needs to be
             converted into an array.
         """
